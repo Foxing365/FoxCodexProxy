@@ -79,6 +79,9 @@ namespace CodexAutoProxy
         public int ListenPort = 7898;
         public int ProbeSeconds = 30;
         public bool LaunchCodexOnStart = true;
+        public bool PreferClash = false;
+        public string UpstreamExe = "";
+        public string UpstreamConfig = "";
 
         public static Settings Load(string path)
         {
@@ -100,6 +103,9 @@ namespace CodexAutoProxy
                 else if (key.Equals("ListenPort", StringComparison.OrdinalIgnoreCase) && Int32.TryParse(item, out parsed) && parsed > 0 && parsed <= 65535) value.ListenPort = parsed;
                 else if (key.Equals("ProbeSeconds", StringComparison.OrdinalIgnoreCase) && Int32.TryParse(item, out parsed)) value.ProbeSeconds = Math.Max(10, parsed);
                 else if (key.Equals("LaunchCodexOnStart", StringComparison.OrdinalIgnoreCase)) value.LaunchCodexOnStart = item.Equals("true", StringComparison.OrdinalIgnoreCase);
+                else if (key.Equals("PreferClash", StringComparison.OrdinalIgnoreCase)) value.PreferClash = item.Equals("true", StringComparison.OrdinalIgnoreCase);
+                else if (key.Equals("UpstreamExe", StringComparison.OrdinalIgnoreCase)) value.UpstreamExe = item;
+                else if (key.Equals("UpstreamConfig", StringComparison.OrdinalIgnoreCase)) value.UpstreamConfig = item;
             }
             if (String.IsNullOrWhiteSpace(value.CodexExe)) throw new InvalidDataException("config.ini 缺少 CodexExe");
             return value;
@@ -113,7 +119,10 @@ namespace CodexAutoProxy
                 "ClashPort=" + ClashPort,
                 "ListenPort=" + ListenPort,
                 "ProbeSeconds=" + ProbeSeconds,
-                "LaunchCodexOnStart=" + LaunchCodexOnStart.ToString().ToLowerInvariant()
+                "LaunchCodexOnStart=" + LaunchCodexOnStart.ToString().ToLowerInvariant(),
+                "PreferClash=" + PreferClash.ToString().ToLowerInvariant(),
+                "UpstreamExe=" + UpstreamExe,
+                "UpstreamConfig=" + UpstreamConfig
             };
             File.WriteAllLines(configPath, lines, new UTF8Encoding(false));
         }
@@ -291,6 +300,9 @@ namespace CodexAutoProxy
         private volatile RouteMode mode = RouteMode.Auto;
         private volatile string detail = "正在检测";
         private volatile string lastProbeUtc = "";
+        private int directSuccesses;
+        private DateTime directCooldown = DateTime.MinValue;
+        private readonly object healthGate = new object();
 
         public RouteDetector(Settings value)
         {
@@ -305,8 +317,15 @@ namespace CodexAutoProxy
         public bool DirectAvailable { get { return directAvailable; } }
         public string Detail { get { return detail; } }
         public string LastProbeUtc { get { return lastProbeUtc; } }
-        public RouteMode EffectiveRoute { get { return mode == RouteMode.Auto ? (directAvailable ? RouteMode.Direct : RouteMode.Clash) : mode; } }
+        public RouteMode EffectiveRoute { get { return mode == RouteMode.Auto ? (settings.PreferClash ? RouteMode.Clash : (directAvailable ? RouteMode.Direct : RouteMode.Clash)) : mode; } }
         public void ProbeNow() { wake.Set(); }
+
+        public void ReportEmptyTunnel(RouteMode route, long elapsedMs, long uploaded, long downloaded)
+        {
+            if (route != RouteMode.Direct || uploaded == 0 || downloaded != 0 || elapsedMs >= 5000) return;
+            lock (healthGate) { directAvailable = false; directSuccesses = 0; directCooldown = DateTime.UtcNow.AddMinutes(2); }
+            Diagnostic.Network("Direct route entered 120-second cooldown after an empty early tunnel close.");
+        }
 
         private void Loop()
         {
@@ -323,16 +342,16 @@ namespace CodexAutoProxy
             try
             {
                 ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
-                HttpWebRequest request = (HttpWebRequest)WebRequest.Create("https://chatgpt.com/");
-                request.Method = "GET";
-                request.Proxy = null;
+                HttpWebRequest request = (HttpWebRequest)WebRequest.Create("https://chatgpt.com/backend-api/codex/responses");
+                request.Method = "HEAD";
+                request.AllowAutoRedirect = false;
+                request.Proxy = settings.PreferClash ? new WebProxy("http://" + settings.ClashHost + ":" + settings.ClashPort) : null;
                 request.Timeout = 5000;
                 request.ReadWriteTimeout = 5000;
                 request.UserAgent = "CodexAutoProxy/1.0";
                 using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
                 {
-                    directAvailable = (int)response.StatusCode < 500;
-                    detail = directAvailable ? "直连可用 (HTTP " + (int)response.StatusCode + ")" : "直连响应异常";
+                    RecordProbe((int)response.StatusCode);
                 }
             }
             catch (WebException ex)
@@ -340,23 +359,37 @@ namespace CodexAutoProxy
                 HttpWebResponse response = ex.Response as HttpWebResponse;
                 if (response != null && (int)response.StatusCode < 500)
                 {
-                    directAvailable = true;
-                    detail = "直连可用 (HTTP " + (int)response.StatusCode + ")";
+                    RecordProbe((int)response.StatusCode);
                     response.Close();
                 }
                 else
                 {
-                    directAvailable = false;
-                    detail = "使用 Clash";
+                    RecordProbe(0);
                     if (response != null) response.Close();
                 }
             }
             catch
             {
-                directAvailable = false;
-                detail = "使用 Clash";
+                RecordProbe(0);
             }
             finally { lastProbeUtc = DateTime.UtcNow.ToString("o"); }
+        }
+
+        private void RecordProbe(int status)
+        {
+            bool reachable = status >= 200 && status < 500;
+            if (settings.PreferClash)
+            {
+                directAvailable = false;
+                detail = reachable ? "Clash TLS 探测可达 (HTTP " + status + ")" : "Clash TLS 探测失败";
+                return;
+            }
+            lock (healthGate)
+            {
+                directSuccesses = reachable ? Math.Min(3, directSuccesses + 1) : 0;
+                directAvailable = directSuccesses >= 3 && DateTime.UtcNow >= directCooldown;
+                detail = directAvailable ? "直连 TLS 探测可达 (HTTP " + status + ")" : "使用 Clash · 直连未连续通过探测";
+            }
         }
 
         public void Dispose()
@@ -606,7 +639,7 @@ namespace CodexAutoProxy
             if (request.Length > headerLength) output.Write(request, headerLength, request.Length - headerLength);
         }
 
-        private static void Relay(NetworkStream incoming, NetworkStream outgoing, TcpClient remote, RouteMode route, int port)
+        private void Relay(NetworkStream incoming, NetworkStream outgoing, TcpClient remote, RouteMode route, int port)
         {
             Stopwatch elapsed = Stopwatch.StartNew();
             long uploadBytes = 0;
@@ -618,6 +651,7 @@ namespace CodexAutoProxy
             long downloadBytes = Copy(outgoing, incoming, out downloadError);
             try { remote.Close(); } catch { }
             upload.Join(500);
+            detector.ReportEmptyTunnel(route, elapsed.ElapsedMilliseconds, uploadBytes, downloadBytes);
             if (downloadBytes == 0 || downloadError != "none" || elapsed.ElapsedMilliseconds < 3000)
                 Diagnostic.Network("tunnel_closed route=" + route + " port=" + port +
                     " elapsedMs=" + elapsed.ElapsedMilliseconds + " uploadBytes=" + uploadBytes +
@@ -652,12 +686,88 @@ namespace CodexAutoProxy
         }
     }
 
+    internal sealed class ManagedUpstream : IDisposable
+    {
+        private readonly Settings settings;
+        private readonly string statePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "managed-upstream.pid");
+        private readonly Queue<DateTime> starts = new Queue<DateTime>();
+        private Process owned;
+        private bool disposed;
+        public ManagedUpstream(Settings value) { settings = value; }
+        public bool Enabled { get { return !String.IsNullOrEmpty(settings.UpstreamExe) && !String.IsNullOrEmpty(settings.UpstreamConfig); } }
+        public void EnsureRunning()
+        {
+            if (disposed || !Enabled) return;
+            if (owned != null && !owned.HasExited) return;
+            if (owned != null) { owned.Dispose(); owned = null; }
+            string root = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            string config = Path.GetFullPath(settings.UpstreamConfig);
+            if (!config.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(config) || !File.Exists(settings.UpstreamExe))
+                throw new InvalidDataException("专用出口配置或 Clash 内核不存在，请重新配置专用节点。");
+            if (File.Exists(statePath))
+            {
+                string[] saved = File.ReadAllLines(statePath);
+                int pid; long ticks;
+                if (saved.Length >= 3 && Int32.TryParse(saved[0], out pid) && Int64.TryParse(saved[1], out ticks) && saved[2] == config)
+                    try
+                    {
+                        Process previous = Process.GetProcessById(pid);
+                        if (previous.StartTime.ToUniversalTime().Ticks == ticks &&
+                            String.Equals(previous.MainModule.FileName, settings.UpstreamExe, StringComparison.OrdinalIgnoreCase))
+                        { owned = previous; Diagnostic.Write("Adopted existing managed upstream pid=" + pid); return; }
+                        previous.Dispose();
+                    }
+                    catch (ArgumentException) { }
+            }
+            while (starts.Count > 0 && starts.Peek() < DateTime.UtcNow.AddMinutes(-1)) starts.Dequeue();
+            if (starts.Count >= 3) return;
+            // Never adopt or terminate an unrelated listener merely because its port matches.
+            using (TcpClient check = new TcpClient())
+            {
+                IAsyncResult attempt = check.BeginConnect(settings.ClashHost, settings.ClashPort, null, null);
+                try { if (attempt.AsyncWaitHandle.WaitOne(250) && check.Connected) throw new IOException("专用出口端口已被其他程序占用。"); }
+                finally { attempt.AsyncWaitHandle.Close(); }
+            }
+            ProcessStartInfo info = new ProcessStartInfo(settings.UpstreamExe);
+            info.Arguments = "-d \"" + Path.GetDirectoryName(config) + "\" -f \"" + config + "\"";
+            info.WorkingDirectory = Path.GetDirectoryName(config);
+            info.UseShellExecute = false;
+            info.CreateNoWindow = true;
+            info.WindowStyle = ProcessWindowStyle.Hidden;
+            info.RedirectStandardOutput = true;
+            info.RedirectStandardError = true;
+            starts.Enqueue(DateTime.UtcNow);
+            owned = new Process();
+            owned.StartInfo = info;
+            owned.OutputDataReceived += delegate { };
+            owned.ErrorDataReceived += delegate { };
+            owned.Start();
+            owned.BeginOutputReadLine();
+            owned.BeginErrorReadLine();
+            File.WriteAllLines(statePath, new[] { owned.Id.ToString(), owned.StartTime.ToUniversalTime().Ticks.ToString(), config });
+            Diagnostic.Write("Started managed upstream pid=" + owned.Id + " port=" + settings.ClashPort);
+        }
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            if (owned != null)
+            {
+                try { if (!owned.HasExited) { owned.Kill(); owned.WaitForExit(3000); } } catch { }
+                owned.Dispose(); owned = null;
+            }
+            if (Enabled) try { File.Delete(statePath); } catch { }
+        }
+    }
+
     internal sealed class TrayContext : ApplicationContext
     {
         private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
         private readonly Settings settings;
         private readonly RouteDetector detector;
         private readonly ProxyServer proxy;
+        private readonly ManagedUpstream upstream;
+        private DateTime nextUpstreamCheck = DateTime.MinValue;
         private readonly NotifyIcon icon;
         private readonly ToolStripMenuItem statusItem;
         private readonly ToolStripMenuItem autoItem;
@@ -675,6 +785,10 @@ namespace CodexAutoProxy
         public TrayContext(Settings value, bool launchNow)
         {
             settings = value;
+            upstream = new ManagedUpstream(settings);
+            try
+            {
+            upstream.EnsureRunning();
             detector = new RouteDetector(settings);
             proxy = new ProxyServer(settings, detector);
             detector.Start();
@@ -755,11 +869,31 @@ namespace CodexAutoProxy
                 launchWorker.IsBackground = true;
                 launchWorker.Start();
             }
+            }
+            catch
+            {
+                closing = true;
+                SystemEvents.SessionEnding -= OnSessionEnding;
+                SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+                AppDomain.CurrentDomain.ProcessExit -= OnProcessExit;
+                if (uiTimer != null) uiTimer.Stop();
+                if (icon != null) { icon.Visible = false; icon.Dispose(); }
+                if (proxy != null) proxy.Dispose();
+                if (detector != null) detector.Dispose();
+                upstream.Dispose();
+                throw;
+            }
         }
 
         private void UiTick(object sender, EventArgs e)
         {
             if (closing) return;
+            if (DateTime.UtcNow >= nextUpstreamCheck)
+            {
+                nextUpstreamCheck = DateTime.UtcNow.AddSeconds(5);
+                try { upstream.EnsureRunning(); }
+                catch (Exception error) { Diagnostic.Network("Managed upstream restart failed: " + Diagnostic.ErrorType(error)); }
+            }
             string command = null;
             lock (commands) { if (commands.Count > 0) command = commands.Dequeue(); }
             if (command == "launch") LaunchCodex();
@@ -876,6 +1010,8 @@ namespace CodexAutoProxy
                 string proxyUrl = "http://127.0.0.1:" + settings.ListenPort;
                 start.EnvironmentVariables["HTTP_PROXY"] = proxyUrl;
                 start.EnvironmentVariables["HTTPS_PROXY"] = proxyUrl;
+                start.EnvironmentVariables["WS_PROXY"] = proxyUrl;
+                start.EnvironmentVariables["WSS_PROXY"] = proxyUrl;
                 start.EnvironmentVariables["ALL_PROXY"] = proxyUrl;
                 start.EnvironmentVariables["NO_PROXY"] = "127.0.0.1,localhost,::1";
                 Process.Start(start);
@@ -891,6 +1027,11 @@ namespace CodexAutoProxy
             using (SettingsForm form = new SettingsForm(settings, IsStartupEnabled()))
             {
                 if (form.ShowDialog() != DialogResult.OK) return;
+                if (upstream.Enabled && form.ClashPort != settings.ClashPort)
+                {
+                    MessageBox.Show("当前使用 Codex 专用出口，请通过专用节点配置脚本修改或关闭，再更改端口。", "Codex 自动代理", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
                 if (form.ClashPort == settings.ListenPort)
                 {
                     MessageBox.Show("Clash 端口不能与本地桥接端口相同，请重新设置。", "Codex 自动代理", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -963,6 +1104,7 @@ namespace CodexAutoProxy
         private void OnSessionEnding(object sender, SessionEndingEventArgs e)
         {
             CrashGuardian.MarkNormalExit();
+            upstream.Dispose();
             try { CodexEnvironment.Disable(); } catch { }
         }
 
@@ -977,6 +1119,7 @@ namespace CodexAutoProxy
 
         private void OnProcessExit(object sender, EventArgs e)
         {
+            upstream.Dispose();
             try { CodexEnvironment.Disable(); } catch { }
         }
 
@@ -993,6 +1136,7 @@ namespace CodexAutoProxy
             try { CodexEnvironment.Disable(); } catch { }
             proxy.Dispose();
             detector.Dispose();
+            upstream.Dispose();
             base.ExitThreadCore();
         }
     }

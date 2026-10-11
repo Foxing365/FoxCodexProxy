@@ -14,9 +14,13 @@ if (Test-Path -LiteralPath $configHelper) {
 
 if (Test-Path -LiteralPath $exe) {
     Start-Process -FilePath $exe -ArgumentList "--exit" -WindowStyle Hidden
-    Start-Sleep -Milliseconds 700
+    $deadline = (Get-Date).AddSeconds(15)
+    do {
+        Start-Sleep -Milliseconds 200
+        $remaining = @(Get-Process -Name 'CodexAutoProxy' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe })
+    } while ($remaining.Count -and (Get-Date) -lt $deadline)
+    if ($remaining.Count) { throw '代理尚未正常退出，安装文件已保留。请退出托盘后重新卸载。' }
 }
-Get-Process -Name "CodexAutoProxy" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
 $backupPath = "HKCU:\Software\CodexAutoProxy\EnvironmentBackup"
 $proxyNames = @("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")

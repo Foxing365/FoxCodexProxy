@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param([string]$Version = '2.2.0')
+param([string]$Version = '2.2.1')
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Use a numeric semantic version.' }
 $repoRoot = Split-Path -Parent $PSScriptRoot

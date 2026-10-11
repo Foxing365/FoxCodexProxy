@@ -14,17 +14,18 @@ function Enable-CodexSystemProxy([string]$InstallRoot, [string]$Executable) {
     $configRoot = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
     $configPath = Join-Path $configRoot 'config.toml'
     $statePath = Join-Path $InstallRoot 'codex-config-state.json'
-    if (Test-Path -LiteralPath $statePath) { return }
+    $existingState = if (Test-Path -LiteralPath $statePath) { Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json } else { $null }
     $content = if (Test-Path -LiteralPath $configPath) { [IO.File]::ReadAllText($configPath) } else { '' }
     $section = [regex]::Match($content, '(?ms)^\[features\][^\r\n]*\r?\n(?<body>.*?)(?=^\[|\z)')
     $old = if ($section.Success) { [regex]::Match($section.Groups['body'].Value, '(?m)^\s*respect_system_proxy\s*=\s*(true|false)[^\r\n]*') } else { $null }
-    if ($old -and $old.Success -and $old.Groups[1].Value -eq 'true') { return }
-    $state = @{ ConfigPath = $configPath; PreviousLine = if ($old -and $old.Success) { $old.Value } else { $null } }
-    # Save before enabling so uninstall can restore even after an interrupted install.
+    if ($old -and $old.Success -and $old.Groups[1].Value -eq 'false' -and -not $existingState) { return }
+    $state = @{ ConfigPath = $configPath; ManagedValue = 'false'; PreviousLine = if ($existingState -and $existingState.ConfigPath -eq $configPath) { $existingState.PreviousLine } elseif ($old -and $old.Success) { $old.Value } else { $null } }
+    # Explicit process proxies must not be overridden by the experimental OS proxy resolver.
+    # Preserve the pre-install value across upgrades, including older managed=true releases.
     [IO.File]::WriteAllText($statePath, ($state | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
-    & $cli.Source features enable respect_system_proxy
-    if ($LASTEXITCODE -ne 0) { throw 'Codex 系统代理开关启用失败。' }
-    Write-Host "已启用 Codex 系统代理支持: $configPath"
+    & $cli.Source features disable respect_system_proxy
+    if ($LASTEXITCODE -ne 0) { throw 'Codex 系统代理开关配置失败。' }
+    Write-Host "已关闭实验性系统代理优先，使用托盘进程代理: $configPath"
 }
 
 function Restore-CodexSystemProxy([string]$InstallRoot) {
@@ -35,7 +36,8 @@ function Restore-CodexSystemProxy([string]$InstallRoot) {
         $content = [IO.File]::ReadAllText($state.ConfigPath)
         $section = [regex]::Match($content, '(?ms)^\[features\][^\r\n]*\r?\n(?<body>.*?)(?=^\[|\z)')
         if ($section.Success) {
-            $line = [regex]::Match($section.Groups['body'].Value, '(?m)^\s*respect_system_proxy\s*=\s*true[^\r\n]*(?:\r?\n|\z)')
+            $managedValue = if ($state.ManagedValue) { [string]$state.ManagedValue } else { 'true' }
+            $line = [regex]::Match($section.Groups['body'].Value, '(?m)^\s*respect_system_proxy\s*=\s*'+$managedValue+'[^\r\n]*(?:\r?\n|\z)')
             if ($line.Success) {
                 $offset = $section.Groups['body'].Index + $line.Index
                 $replacement = if ($null -ne $state.PreviousLine) { [string]$state.PreviousLine + "`r`n" } else { '' }

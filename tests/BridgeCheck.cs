@@ -34,6 +34,40 @@ namespace CodexAutoProxy {
             loaded.LaunchCodexOnStart=true; loaded.Save();
             if(!Settings.Load(cfg).LaunchCodexOnStart) throw new Exception("setting not saved");
             Console.WriteLine("AUTOLAUNCH_SETTING_OK");
+            loaded.PreferClash=true; loaded.UpstreamExe="test-core.exe"; loaded.UpstreamConfig="test-config.yaml"; loaded.Save();
+            var persisted=Settings.Load(cfg);
+            if(!persisted.PreferClash || persisted.UpstreamExe!="test-core.exe" || persisted.UpstreamConfig!="test-config.yaml") throw new Exception("dedicated setting not saved");
+            using(var health=new RouteDetector(new Settings())) {
+                var record=typeof(RouteDetector).GetMethod("RecordProbe",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
+                record.Invoke(health,new object[]{405}); record.Invoke(health,new object[]{405});
+                if(health.DirectAvailable) throw new Exception("direct enabled prematurely");
+                record.Invoke(health,new object[]{405}); if(!health.DirectAvailable) throw new Exception("direct health never enabled");
+                health.ReportEmptyTunnel(RouteMode.Direct,400,458,0);
+                record.Invoke(health,new object[]{405}); record.Invoke(health,new object[]{405}); record.Invoke(health,new object[]{405});
+                if(health.DirectAvailable) throw new Exception("direct cooldown ignored");
+            }
+            Console.WriteLine("ROUTE_HEALTH_COOLDOWN_OK");
+            int corePort=FreePort();
+            string coreConfig=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"fake-core.yaml");
+            File.WriteAllText(coreConfig,"mixed-port: "+corePort);
+            var coreSettings=new Settings(); coreSettings.ClashPort=corePort; coreSettings.PreferClash=true;
+            coreSettings.UpstreamExe=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"FakeCore.exe"); coreSettings.UpstreamConfig=coreConfig;
+            int firstPid;
+            using(var managed=new ManagedUpstream(coreSettings)) {
+                managed.EnsureRunning(); Thread.Sleep(300);
+                string state=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"managed-upstream.pid");
+                firstPid=Int32.Parse(File.ReadAllLines(state)[0]);
+                using(var child=System.Diagnostics.Process.GetProcessById(firstPid)) { child.Kill(); child.WaitForExit(); }
+                managed.EnsureRunning(); Thread.Sleep(300);
+                int secondPid=Int32.Parse(File.ReadAllLines(state)[0]);
+                if(secondPid==firstPid) throw new Exception("managed core not restarted");
+                // A fresh tray can adopt the exact recorded process after its predecessor crashes.
+                using(var adopted=new ManagedUpstream(coreSettings)) { adopted.EnsureRunning(); }
+                try { using(var child=System.Diagnostics.Process.GetProcessById(secondPid)) {
+                    if(!child.WaitForExit(3000)) throw new Exception("adopted core not cleaned up");
+                } } catch(ArgumentException) { /* Already removed from the process table. */ }
+            }
+            Console.WriteLine("MANAGED_CORE_START_RECOVER_ADOPT_STOP_OK");
         }
     }
 }

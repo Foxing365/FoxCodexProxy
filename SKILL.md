@@ -5,6 +5,8 @@ description: Install, inspect, repair, configure, or remove FoxCodexProxy for Co
 
 # FoxCodexProxy for Windows
 
+Version: 2.2.1. Windows-only; macOS remains pending.
+
 Read [references/windows.md](references/windows.md) before installing or changing the proxy. This release supports native Windows only; do not run these installers on macOS, Linux, or WSL. macOS release is pending.
 
 Installation of this agent skill only makes the instructions available; it does not install the tray application or enable startup. When the user asks to install the proxy, run the application installer too.
@@ -27,9 +29,25 @@ Do not close an active Codex session during installation or upgrade. Ask the use
 
 - Bind only to 127.0.0.1; inject proxy variables only into Codex launched by the tray. Never set new user-level proxy variables, modify global OS proxy settings, retarget Codex shortcuts, or install TLS certificates.
 - Preserve unrelated settings. Legacy managed proxy values are restored from saved backups. Existing applications may need restarting after migration.
-- The installer enables `respect_system_proxy` only when detected in the local CLI. This is an ordinary-launch fallback; the tray launch is the primary bridge entrypoint.
+- When supported by the local CLI, the installer disables experimental `respect_system_proxy` so system proxy preference does not override process-scoped bridge settings for model/plugin requests. It saves the previous feature value for uninstall restoration. Do not change the OS/main Clash system proxy. Use the tray launch; ordinary app-icon launches are not guaranteed to use this bridge.
 - Confirm the listener and a TLS request through it, and inspect fresh status/route evidence. HTTP reachability does not prove account login or eliminate service errors.
 - Verify a newly opened Codex session when practical; if keeping the current session open, disclose that end-to-end relaunch remains for the user.
 - Auto-mode direct probing may still be intercepted by Clash TUN. Do not promise that all reconnects disappear or that every future Codex update remains compatible.
+
+## Optional dedicated route
+
+PreferClash=true in installed config.ini makes Auto prefer the configured Clash endpoint. Auto otherwise probes the actual Codex responses endpoint using HEAD, requires three consecutive successful TLS/HTTP probes before Direct, and cools Direct down for 120 seconds after an early empty tunnel close. These are health heuristics, not account verification or a guarantee against retries. Do not replay TLS/application requests inside an established tunnel.
+
+When the user authorizes a dedicated route, test nodes from that user's local subscription first, then run the installed script:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\CodexAutoProxy\configure-dedicated-route.ps1" -NodeName "USER'S TESTED NODE NAME"
+```
+
+This borrows the already-installed mihomo executable for an isolated loopback instance, without changing the main Clash selector, TUN, or system proxy. The default dedicated port is 17897. Node names are machine-specific; never hard-code the developer's node. Dynamic providers or nodes depending on other proxies need separate inspection. Use -ClashConfig, -CorePath, or -InterfaceAlias when discovery does not match the host.
+
+Private YAML and backups stay under LOCALAPPDATA\CodexAutoProxy\dedicated-route and must never be published, logged, or copied into the skill/repository. Reconfigure after subscription credentials, node definitions, or the physical network interface change. To roll back only the route settings, run the same script with -Disable; the bridge restarts without closing Codex, but active connections can briefly disconnect. Upgrades preserve ports, startup options, and dedicated-route settings.
+
+HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, WS_PROXY, WSS_PROXY, and NO_PROXY are process-scoped. Inspect config.ini, status.json, and verified managed PID evidence only; never print the private YAML. Do not call the network stable solely because a port listens or an unauthenticated HEAD returns HTTP 405; verify repeated TLS tests, long-lived connections, and a real Codex turn separately.
 
 Read-only inspection does not authorize installation, repair, or removal. Follow the user's requested action; use the installed `status.cmd` or `uninstall.cmd` for those operations.

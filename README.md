@@ -1,6 +1,6 @@
 # FoxCodexProxy
 
-给 Windows 上的 Codex 桌面应用使用的本地代理桥接和托盘启动器。当前发布版本：**v2.2.0（仅 Windows）**。macOS 版暂不发布。
+给 Windows 上的 Codex 桌面应用使用的本地代理桥接和托盘启动器。当前版本：**v2.2.1（仅 Windows）**。macOS 版暂不发布。
 
 这是第三方辅助工具，不是 OpenAI 官方产品。不需要管理员权限，不安装证书，不修改 Windows 全局代理，也不设置用户级代理环境变量。
 
@@ -8,9 +8,9 @@
 
 打开 [Releases](https://github.com/Foxing365/FoxCodexProxy/releases/latest)，选择一种方式：
 
-- 普通用户：下载 `FoxCodexProxy-Setup-v2.2.0.exe`，双击后按安装窗口操作。
-- ZIP 安装：下载 `FoxCodexProxy-Windows-v2.2.0.zip`，先完整解压，再双击 `setup-windows.cmd`。
-- AI agent：下载 `fox-codex-proxy-skill-v2.2.0.zip`，解压给 agent，要求它读取 `SKILL.md` 并在本机安装。也可以让 agent 从本仓库根目录安装 skill，名称使用 `fox-codex-proxy`。
+- 普通用户：下载 `FoxCodexProxy-Setup-v2.2.1.exe`，双击后按安装窗口操作。
+- ZIP 安装：下载 `FoxCodexProxy-Windows-v2.2.1.zip`，先完整解压，再双击 `setup-windows.cmd`。
+- AI agent：下载 `fox-codex-proxy-skill-v2.2.1.zip`，解压给 agent，要求它读取 `SKILL.md` 并在本机安装。也可以让 agent 从本仓库根目录安装 skill，名称使用 `fox-codex-proxy`。
 
 需要 Windows 10/11、.NET Framework 4.8 和已安装的 Codex 桌面应用。无法直连时还需要可用的 Clash Verge 节点；默认 Clash mixed port 为 `7897`，桥接端口为 `7898`，可按本机设置修改。代理端口和桥接端口不能相同。
 
@@ -29,21 +29,47 @@
 
 程序启动时先监听桥接端口，最多等待 Clash 30 秒再启动 Codex；Clash 尚未可用时连接仍可能失败，启动 Clash 后重试即可。托盘可选择 Auto、Direct、Clash；Auto 根据连通性探测选择路由，启用 Clash TUN 时，“Direct”不代表绕过 TUN。
 
+Auto 用 Codex 实际响应接口的 HEAD 请求检测 TLS 连通性，连续通过三次才采用 Direct；直连隧道在 5 秒内上传数据却未收到任何数据便关闭时，进入 120 秒冷却。`config.ini` 的 `PreferClash=true` 可让 Auto 优先使用指定 Clash 出口，不再因直连探测偶然成功而跳回 Direct。HTTP 405 等正常响应只说明 TLS/HTTP 可达，不等于登录成功。
+
 Auto 可在路线建立失败时尝试另一条路线，但 CONNECT 建立后的 TLS/业务失败不会在同一隧道内换线或重放请求。托盘路线和状态表示探测结果，不等于账户登录或模型请求一定成功。
 
 每次启动 Codex 都会重新查询当前注册的 Store 安装版本，避免正常更新后路径失效；非 Store 安装可在安装窗口指定桌面 EXE。不要选择 `bin` 目录中的 Codex CLI。未来 Codex 若改变代理支持或启动接口，仍可能需要更新本工具。
 
-如果从原图标启动 Codex，可使用 Clash 系统代理作为备用方式（安装器会在 CLI 支持时启用 `respect_system_proxy`）。主要推荐托盘启动。
+请从托盘启动 Codex；从原图标启动不保证经过本工具。安装器检测 CLI 支持时关闭实验性 `respect_system_proxy`，防止系统代理优先覆盖进程桥接，让模型和插件请求遵循同一个进程出口。原设置会保存，卸载时按备份恢复；主 Clash/Windows 系统代理本身不作修改。
 
 ## 状态与卸载
 
 安装到 `%LOCALAPPDATA%\CodexAutoProxy`，配置、日志和状态也在该目录。开始菜单有启动、状态检查和卸载入口；也可在 Windows“已安装的应用”中卸载 Codex Auto Proxy。
 
-升级时请重新核对安装窗口的端口和两个启动选项；安装器会按本次选择重新生成配置，自定义桥接端口应通过命令行 `-ListenPort` 指定。
+升级会保留已有端口、启动选项和专用出口配置；安装窗口可核对或调整选项。已启用专用出口时，不能只修改出口端口，应先按下文停用专用出口。
 
 工具保留 CONNECT 长连接，不再使用旧版的 15 秒空闲超时，并有异常退出守护。它不能解决节点失效、上游 TLS 中断、服务端拥挤、账户认证问题，也不保证消除所有“重试 5 次”。旧版遗留用户级代理变量会按原备份恢复；迁移后其他已运行的应用可能需要重启一次。
 
 连接诊断记录路线、端口、异常类型、持续时间和字节数，每分钟最多 10 条详细网络记录。不记录目标 URL、请求头、令牌或对话内容；快速关闭记录也可能是正常连接结束，并不单独证明 TLS 故障。
+
+## 可选：Codex 专用稳定节点
+
+如果当前 Clash 节点对 Codex 经常出现 TLS 握手失败，可先分别测试自己订阅中的节点，再为 Codex 单独选一个稳定节点，不需要改变其他应用正在使用的主节点：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\CodexAutoProxy\configure-dedicated-route.ps1" -NodeName "你自己已实测稳定的节点名称"
+```
+
+工具借用本机已安装的 mihomo 内核启动独立实例，默认专用端口 `17897`，不启用 TUN、不接管系统代理、不切换主 Clash 节点。托盘管理这个实例，并通过 `PreferClash=true` 使用专用出口。节点名称应来自你自己的本机配置，不要照抄别人的；动态 provider 或依赖其他出口的节点可能不能直接导出。
+
+节点凭据仅保存在本机 `%LOCALAPPDATA%\CodexAutoProxy\dedicated-route`；不要上传这个目录、备份 YAML 或任何订阅/凭据到公开仓库。订阅更新、节点凭据变化、网卡名称/网络切换后，需要重新运行配置命令；可用 `-InterfaceAlias "网卡名称"`、`-CorePath "内核路径"`、`-ClashConfig "本机配置路径"` 指定实际环境。
+
+停用并恢复配置前的普通 Clash 出口：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\CodexAutoProxy\configure-dedicated-route.ps1" -Disable
+```
+
+配置命令会重启桥接，不关闭当前 Codex，但进行中的连接可能短暂中断。专用出口仍不能修复服务端错误，也不保证消灭全部重试。
+
+## 同类参考
+
+[Codex-Connectivity](https://github.com/zhenyangLab/Codex-Connectivity) 和 [codex-app-proxy](https://github.com/leisair/codex-app-proxy) 也可作为排障参考。本项目已具备进程级代理注入与动态 Store 路径发现，未复制这些项目的代码。HTTP/HTTPS/ALL 及 WS/WSS 代理变量仅传给托盘启动的 Codex 子进程。
 
 ## 从源码构建
 

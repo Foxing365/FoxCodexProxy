@@ -2,6 +2,13 @@
 param()
 
 $ErrorActionPreference = "Stop"
+$installedValues = @{}
+$installedConfig = Join-Path $env:LOCALAPPDATA 'CodexAutoProxy\config.ini'
+if (Test-Path -LiteralPath $installedConfig) {
+    foreach ($line in [IO.File]::ReadAllLines($installedConfig)) {
+        if ($line -match '^([^=#]+)=(.*)$') { $installedValues[$matches[1]] = $matches[2] }
+    }
+}
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()
@@ -60,6 +67,15 @@ foreach ($config in $clashConfigs) {
         if ($detectedPort -ge 1 -and $detectedPort -le 65535) { $port.Value = $detectedPort; break }
     }
 }
+if ($installedValues.ClashPort) {
+    $savedPort = 0
+    if ([int]::TryParse($installedValues.ClashPort, [ref]$savedPort) -and $savedPort -ge 1 -and $savedPort -le 65535) {
+        $port.Value = $savedPort
+    }
+}
+if ($installedValues.UpstreamExe -and $installedValues.UpstreamConfig) {
+    $portLabel.Text = 'Codex 专用出口端口：'
+}
 $port.Location = New-Object Drawing.Point(205, 91)
 $port.Size = New-Object Drawing.Size(100, 24)
 $form.Controls.Add($port)
@@ -68,12 +84,18 @@ $startup = New-Object Windows.Forms.CheckBox
 $startup.Text = "随 Windows 登录启动代理（推荐）"
 $startup.AutoSize = $true
 $startup.Checked = $true
+if (Test-Path -LiteralPath $installedConfig) {
+    $startup.Checked = [bool](Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name CodexAutoProxy -ErrorAction SilentlyContinue).CodexAutoProxy
+}
 $startup.Location = New-Object Drawing.Point(20, 135)
 $form.Controls.Add($startup)
 $launchCodex = New-Object Windows.Forms.CheckBox
 $launchCodex.Text = "代理启动时同时启动 Codex（推荐）"
 $launchCodex.AutoSize = $true
 $launchCodex.Checked = $true
+if ($installedValues.ContainsKey('LaunchCodexOnStart')) {
+    $launchCodex.Checked = $installedValues.LaunchCodexOnStart -eq 'true'
+}
 $launchCodex.Location = New-Object Drawing.Point(20, 165)
 $form.Controls.Add($launchCodex)
 
@@ -103,9 +125,8 @@ $install.Add_Click({
     try {
         $install.Enabled = $false
         $install.Text = "安装中…"
-        $arguments = @{ ClashPort = [int]$port.Value; LaunchCodexOnStart = [bool]$launchCodex.Checked }
+        $arguments = @{ ClashPort = [int]$port.Value; LaunchCodexOnStart = [bool]$launchCodex.Checked; StartWithWindows = [bool]$startup.Checked }
         if ($codexBox.Text.Trim()) { $arguments.CodexExe = $codexBox.Text.Trim() }
-        if ($startup.Checked) { $arguments.StartWithWindows = $true }
         & (Join-Path $PSScriptRoot "install.ps1") @arguments
         [Windows.Forms.MessageBox]::Show('安装完成。请完全退出已打开的 Codex，再从代理托盘的“启动 Codex”打开。请在 Windows 设置 → 应用 → 启动中关闭 Codex/ChatGPT 自己的自启，并关闭应用内的登录启动选项（若有）；保留 Clash 与代理自启。自动启动行为按你勾选的两项设置执行。', "Codex 自动代理", "OK", "Information") | Out-Null
         $form.DialogResult = [Windows.Forms.DialogResult]::OK

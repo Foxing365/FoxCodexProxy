@@ -5,6 +5,8 @@ New-Item -ItemType Directory -Path $testRoot | Out-Null
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path -LiteralPath $compiler)) { $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
 $exe = Join-Path $testRoot 'BridgeCheck.exe'
+& $compiler /nologo /target:exe /reference:System.dll "/out:$(Join-Path $testRoot 'FakeCore.exe')" (Join-Path $PSScriptRoot 'FakeCore.cs')
+if ($LASTEXITCODE -ne 0) { throw 'Fake core compilation failed.' }
 & $compiler /nologo /target:exe /main:CodexAutoProxy.BridgeCheck /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll "/out:$exe" (Join-Path $root 'scripts\windows\CodexAutoProxy.cs') (Join-Path $PSScriptRoot 'BridgeCheck.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Test compilation failed.' }
 & $exe

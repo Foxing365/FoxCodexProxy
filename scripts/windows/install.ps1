@@ -4,12 +4,26 @@ param(
     [int]$ClashPort = 0,
     [int]$ListenPort = 7898,
     [switch]$StartWithWindows,
-    [bool]$LaunchCodexOnStart = $true
+    [bool]$LaunchCodexOnStart = $true,
+    [switch]$NoLaunch
 )
 
 $ErrorActionPreference = "Stop"
 $installRoot = Join-Path $env:LOCALAPPDATA "CodexAutoProxy"
 $manifestPath = Join-Path $installRoot "shortcut-manifest.json"
+$previousValues = @{}
+$previousIni = Join-Path $installRoot 'config.ini'
+if (Test-Path -LiteralPath $previousIni) {
+    foreach ($line in [IO.File]::ReadAllLines($previousIni)) {
+        if ($line -match '^([^=#]+)=(.*)$') { $previousValues[$matches[1]]=$matches[2] }
+    }
+    if (-not $PSBoundParameters.ContainsKey('ListenPort') -and $previousValues.ListenPort) { $ListenPort=[int]$previousValues.ListenPort }
+    if (-not $PSBoundParameters.ContainsKey('ClashPort') -and $previousValues.ClashPort) { $ClashPort=[int]$previousValues.ClashPort }
+    if (-not $PSBoundParameters.ContainsKey('LaunchCodexOnStart') -and $previousValues.ContainsKey('LaunchCodexOnStart')) { $LaunchCodexOnStart=$previousValues.LaunchCodexOnStart -eq 'true' }
+    if (-not $PSBoundParameters.ContainsKey('StartWithWindows')) {
+        $StartWithWindows=[bool](Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name CodexAutoProxy -ErrorAction SilentlyContinue).CodexAutoProxy
+    }
+}
 
 function Get-ShortcutTarget([string]$Path) {
     $shell = New-Object -ComObject WScript.Shell
@@ -97,16 +111,27 @@ if ($ListenPort -lt 1 -or $ListenPort -gt 65535) { throw "-ListenPort 必须在 
 $CodexExe = Resolve-CodexExecutable $CodexExe
 $ClashPort = Resolve-ClashPort $ClashPort
 if ($ListenPort -eq $ClashPort) { throw '桥接端口和 Clash 端口不能相同。' }
+if ($previousValues.UpstreamExe -and $previousValues.UpstreamConfig -and
+    $previousValues.ClashPort -and $ClashPort -ne [int]$previousValues.ClashPort) {
+    throw '当前使用 Codex 专用出口，升级不能单独修改出口端口。请保留原端口，或先运行 configure-dedicated-route.ps1 -Disable 后再切换普通 Clash。'
+}
 
 New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
 
-$running = Get-Process -Name "CodexAutoProxy" -ErrorAction SilentlyContinue
+$oldExe = Join-Path $installRoot "CodexAutoProxy.exe"
+function Get-InstalledProxyProcesses {
+    Get-CimInstance Win32_Process -Filter "Name='CodexAutoProxy.exe'" |
+        Where-Object { $_.ExecutablePath -eq $oldExe }
+}
+$running = @(Get-InstalledProxyProcesses)
 if ($running) {
-    $oldExe = Join-Path $installRoot "CodexAutoProxy.exe"
     if (Test-Path -LiteralPath $oldExe) { Start-Process -FilePath $oldExe -ArgumentList "--exit" -WindowStyle Hidden }
-    $stopDeadline = (Get-Date).AddSeconds(8)
-    do { Start-Sleep -Milliseconds 200 } while ((Get-Process -Name 'CodexAutoProxy' -ErrorAction SilentlyContinue) -and (Get-Date) -lt $stopDeadline)
-    Get-Process -Name "CodexAutoProxy" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    $stopDeadline = (Get-Date).AddSeconds(15)
+    do {
+        Start-Sleep -Milliseconds 200
+        $running = @(Get-InstalledProxyProcesses)
+    } while ($running.Count -and (Get-Date) -lt $stopDeadline)
+    if ($running.Count) { throw '旧代理未正常退出，升级已停止；现有程序和配置已保留。请从托盘退出代理后重新安装。' }
 }
 
 $prebuiltRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\..\bin\windows"))
@@ -127,6 +152,7 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot "uninstall.cmd") -Destination $i
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "status.ps1") -Destination $installRoot -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "status.cmd") -Destination $installRoot -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "codex-config.ps1") -Destination $installRoot -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot "configure-dedicated-route.ps1") -Destination $installRoot -Force
 . (Join-Path $installRoot 'codex-config.ps1')
 Enable-CodexSystemProxy $installRoot $CodexExe
 
@@ -135,9 +161,12 @@ $config = @(
     "ClashHost=127.0.0.1",
     "ClashPort=$ClashPort",
     "ListenPort=$ListenPort",
-    "ProbeSeconds=30",
+    "ProbeSeconds=$(if ($previousValues.ProbeSeconds) { [Math]::Max(10,[int]$previousValues.ProbeSeconds) } else { 30 })",
     "LaunchCodexOnStart=$($LaunchCodexOnStart.ToString().ToLowerInvariant())"
 )
+foreach ($key in 'PreferClash','UpstreamExe','UpstreamConfig') {
+    if ($previousValues.ContainsKey($key)) { $config += $key+'='+$previousValues[$key] }
+}
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [IO.File]::WriteAllLines((Join-Path $installRoot "config.ini"), $config, $utf8NoBom)
 
@@ -191,7 +220,7 @@ $statusLink.Save()
 $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CodexAutoProxy"
 New-Item -Path $uninstallKey -Force | Out-Null
 New-ItemProperty -Path $uninstallKey -Name "DisplayName" -Value "Codex Auto Proxy" -Force | Out-Null
-New-ItemProperty -Path $uninstallKey -Name "DisplayVersion" -Value "2.2.0" -Force | Out-Null
+New-ItemProperty -Path $uninstallKey -Name "DisplayVersion" -Value "2.2.1" -Force | Out-Null
 New-ItemProperty -Path $uninstallKey -Name "Publisher" -Value "Local installation" -Force | Out-Null
 New-ItemProperty -Path $uninstallKey -Name "InstallLocation" -Value $installRoot -Force | Out-Null
 New-ItemProperty -Path $uninstallKey -Name "DisplayIcon" -Value $proxyExe -Force | Out-Null
@@ -200,11 +229,12 @@ New-ItemProperty -Path $uninstallKey -Name "NoModify" -PropertyType DWord -Value
 New-ItemProperty -Path $uninstallKey -Name "NoRepair" -PropertyType DWord -Value 1 -Force | Out-Null
 New-ItemProperty -Path $uninstallKey -Name "EstimatedSize" -PropertyType DWord -Value 256 -Force | Out-Null
 
-Start-Process -FilePath $proxyExe -WindowStyle Hidden
+if ($NoLaunch) { Start-Process -FilePath $proxyExe -ArgumentList '--no-launch' -WindowStyle Hidden }
+else { Start-Process -FilePath $proxyExe -WindowStyle Hidden }
 Write-Host "安装完成。"
 Write-Host "Codex: $CodexExe"
 Write-Host "本地桥接: 127.0.0.1:$ListenPort"
 Write-Host "Clash: 127.0.0.1:$ClashPort"
 Write-Host '自动启动行为按两项启动设置执行。当前已打开的 Codex 需要完全退出后，从托盘“启动 Codex”重开一次。'
-Write-Host "代理仅传给从托盘启动的 Codex，不再接管用户级代理变量。原图标启动仍可使用 Clash 系统代理。"
+Write-Host "代理仅传给从托盘启动的 Codex，不再接管用户级代理变量。请使用托盘启动入口。"
 Write-Host "请在 Windows 设置 → 应用 → 启动中关闭 Codex/ChatGPT 自己的启动项，保留 Codex Auto Proxy；同时关闭 Codex 应用内的登录时启动选项（若有）。"
