@@ -1,0 +1,11 @@
+dist/
+*.compile.cs
+test-settings.ini
+diagnostic.log
+status.json
+config.ini
+codex-config-state.json
+shortcut-manifest.json
+shortcut-backups/
+.DS_Store
+Thumbs.db
