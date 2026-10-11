@@ -1,5 +1,7 @@
 # Windows v2.2.1 verification
 
+Status: preview, not verified continuously stable. The initially passing dedicated node subsequently failed; a fresh independent instance reproduced node TCP dial timeouts. Other tested nodes were intermittent or returned HTTP 403. The dedicated route was rolled back on the test host. Earlier passing counts below describe a finite test window, not sustained stability.
+
 Local Windows checks performed before publication:
 
 - CONNECT tunnel remains usable after 17 seconds of inactivity.

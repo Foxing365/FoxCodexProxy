@@ -1,12 +1,14 @@
 # FoxCodexProxy
 
-给 Windows 上的 Codex 桌面应用使用的本地代理桥接和托盘启动器。当前版本：**v2.2.1（仅 Windows）**。macOS 版暂不发布。
+给 Windows 上的 Codex 桌面应用使用的本地代理桥接和托盘启动器。当前版本：**v2.2.1 预览版（仅 Windows）**。macOS 版暂不发布。
+
+软件回归测试已通过，但持续端到端稳定性尚未验证：后续测试中，曾短期连续通过的节点也出现 TCP 超时。请勿把本版理解为已消除重连；专用节点仅在你自己的重复真实请求验证通过后启用。
 
 这是第三方辅助工具，不是 OpenAI 官方产品。不需要管理员权限，不安装证书，不修改 Windows 全局代理，也不设置用户级代理环境变量。
 
 ## 下载安装
 
-打开 [Releases](https://github.com/Foxing365/FoxCodexProxy/releases/latest)，选择一种方式：
+打开 [Releases](https://github.com/Foxing365/FoxCodexProxy/releases/tag/v2.2.1)，选择一种方式：
 
 - 普通用户：下载 `FoxCodexProxy-Setup-v2.2.1.exe`，双击后按安装窗口操作。
 - ZIP 安装：下载 `FoxCodexProxy-Windows-v2.2.1.zip`，先完整解压，再双击 `setup-windows.cmd`。
