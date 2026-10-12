@@ -5,9 +5,9 @@ description: Install, inspect, repair, configure, or remove FoxCodexProxy for Co
 
 # FoxCodexProxy
 
-Version: 2.2.1. Windows release and native macOS preview.
+Release: 2.3.0. Includes Windows runtime 2.2.1 and native macOS 2.3.0.
 
-Choose the host platform. On macOS read [references/macos.md](references/macos.md), use the bundled universal `bin/macos/fox-codex-proxy`, and install only when requested with `--install`. Preserve original-icon launches, WSS, and on-demand launchd activation; do not add a tray, login watcher, KeepAlive, RunAtLoad, global proxy, or new model provider. Run `--status` and a fresh `--check`, then verify a real Codex response separately. Active-service upgrades stop safely; do not kill running tasks to continue. Source build: `scripts/macos/build.sh`. See [macOS comparisons](references/macos-comparison.md) for evidence and limitations.
+Choose the host platform. On macOS read [references/macos.md](references/macos.md), use the bundled universal `bin/macos/fox-codex-proxy`, and install only when requested with `--install` (no GUI prompts). First run `--detect-clash-port` and inspect existing proxy ownership; the helper also detects the default mixed port for a fresh installation. Do not request Python/Homebrew or compile when the bundled binary is valid. Preserve original-icon launches, WSS, and on-demand launchd activation; do not add a tray, login watcher, KeepAlive, RunAtLoad, global proxy, or new model provider. Run `--status` and a fresh `--check`, then verify a real Codex response separately. Active-service upgrades stop safely; do not kill running tasks to continue. Source build: `scripts/macos/build.sh`. See [macOS comparisons](references/macos-comparison.md) for evidence and limitations.
 
 The instructions below are Windows-specific. Read [references/windows.md](references/windows.md) before Windows operations. Do not run Windows installers on macOS, Linux or WSL.
 

@@ -1,12 +1,16 @@
 # FoxCodexProxy
 
-给 Codex 桌面应用使用的本地代理工具。Windows 为 **v2.2.1 预览版托盘启动器**；macOS 新增 **v2.2.1 原生按需构建**，无托盘、保留原图标。macOS 安装包当前由本地构建生成，尚未上传 GitHub Release。
+给 Codex 桌面应用使用的本地代理工具。当前正式发布包：**v2.3.0**，包含 Windows v2.2.1 托盘运行程序和 macOS v2.3.0 原生自动代理。macOS 无托盘、保留原图标。正式发布不表示已解决所有连接重试。
 
 软件回归测试已通过，但持续端到端稳定性尚未验证：后续测试中，曾短期连续通过的节点也出现 TCP 超时。请勿把本版理解为已消除重连；专用节点仅在你自己的重复真实请求验证通过后启用。
 
 这是第三方辅助工具，不是 OpenAI 官方产品。不需要管理员权限，不安装证书，不修改 Windows 全局代理，也不设置用户级代理环境变量。
 
-## macOS 构建与使用
+## macOS 安装与使用
+
+从 [v2.3.0 Releases](https://github.com/Foxing365/FoxCodexProxy/releases/tag/v2.3.0) 下载 `FoxCodexProxy-macOS-v2.3.0.zip`，完整解压后双击 `setup-macos.command`，核对检测到的 Clash 端口即可安装。状态和卸载分别双击包内 `status-macos.command`、`uninstall-macos.command`。
+
+希望 AI 处理端口核对和旧代理迁移：下载 `fox-codex-proxy-skill-v2.3.0.zip`，让 agent 读取 `SKILL.md` 并安装；安装 skill 本身不等于安装代理。
 
 macOS 13+，支持 Apple Silicon / Intel。系统 launchd 仅保留回环 socket；Codex 连接时启动 helper，所有连接结束 30 秒后退出，不添加登录常驻程序。保留原图标和 WSS，不需要 Python。
 
@@ -17,15 +21,15 @@ macOS 13+，支持 Apple Silicon / Intel。系统 launchd 仅保留回环 socket
 ./bin/macos/fox-codex-proxy --install --clash-port 7897 --port 7898
 ```
 
-安装到本地 Application Support，不从 OneDrive 长期运行。安装/卸载的配置保护、未签名公证限制和验证边界见 [macOS 使用说明](references/macos.md)。实际方案与 GitHub 项目的比较见 [研究记录](references/macos-comparison.md)：使用体验更符合我们的需求，尚无证据证明稳定性更优。构建不会自动替换本机正在运行的旧 Python 服务。
+安装到本地 Application Support，不从 OneDrive 长期运行。安装/卸载的配置保护、未签名公证限制和验证边界见 [macOS 使用说明](references/macos.md)。实际方案与 GitHub 项目的比较见 [研究记录](references/macos-comparison.md)：使用体验更符合我们的需求，尚无证据证明稳定性更优。构建和下载不会自动替换本机旧代理，安装时运行中的服务会安全拒绝升级。
 
 ## Windows 下载安装
 
-打开 [Releases](https://github.com/Foxing365/FoxCodexProxy/releases/tag/v2.2.1)，选择一种方式：
+打开 [Releases](https://github.com/Foxing365/FoxCodexProxy/releases/tag/v2.3.0)，选择一种方式：
 
 - 普通用户：下载 `FoxCodexProxy-Setup-v2.2.1.exe`，双击后按安装窗口操作。
 - ZIP 安装：下载 `FoxCodexProxy-Windows-v2.2.1.zip`，先完整解压，再双击 `setup-windows.cmd`。
-- AI agent：下载 `fox-codex-proxy-skill-v2.2.1.zip`，解压给 agent，要求它读取 `SKILL.md` 并在本机安装。也可以让 agent 从本仓库根目录安装 skill，名称使用 `fox-codex-proxy`。
+- AI agent：下载 `fox-codex-proxy-skill-v2.3.0.zip`，解压给 agent，要求它读取 `SKILL.md` 并在本机安装。也可以让 agent 从本仓库根目录安装 skill，名称使用 `fox-codex-proxy`。
 
 需要 Windows 10/11、.NET Framework 4.8 和已安装的 Codex 桌面应用。无法直连时还需要可用的 Clash Verge 节点；默认 Clash mixed port 为 `7897`，桥接端口为 `7898`，可按本机设置修改。代理端口和桥接端口不能相同。
 
@@ -94,4 +98,4 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\build-releas
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\run.ps1
 ```
 
-发布产物位于 `dist/`，包含 EXE 安装器、Windows ZIP、skill ZIP 和 SHA-256 校验文件。安装器源码为 `packaging/SetupLauncher.cs`，托盘源码为 `scripts/windows/CodexAutoProxy.cs`。构建不需要下载第三方打包器。
+发布产物位于 `dist/`，包含 EXE 安装器、Windows ZIP、skill ZIP 和 SHA-256 校验文件。Windows EXE/ZIP 沿用 v2.2.1 已构建产物，Windows runtime 未改变；macOS 和统一 skill 为 v2.3.0。安装器源码为 `packaging/SetupLauncher.cs`，托盘源码为 `scripts/windows/CodexAutoProxy.cs`。构建不需要下载第三方打包器。

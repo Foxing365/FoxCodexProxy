@@ -1,8 +1,8 @@
 # 给 AI agent 的安装提示
 
-先读取 `SKILL.md`，按平台选择 `references/windows.md` 或 `references/macos.md`。Windows 为 v2.2.1；macOS 为同版本的原生预览构建。
+先读取 `SKILL.md`，按平台选择 `references/windows.md` 或 `references/macos.md`。统一发布包为 v2.3.0，Windows runtime 沿用 v2.2.1，macOS 为原生 v2.3.0。
 
-macOS 使用原图标 + `.codex/.env` + launchd 按需监听，不要安装托盘或常驻监听器。授权安装时运行 `bin/macos/fox-codex-proxy --install`；状态/卸载用 `--status`、`--uninstall`。构建不等于已安装或长期稳定，运行中的旧服务不得为升级而强杀。下文仅针对 Windows。
+macOS 使用原图标 + `.codex/.env` + launchd 按需监听，不要安装托盘或常驻监听器。授权安装时运行 `bin/macos/fox-codex-proxy --install`；状态/卸载用 `--status`、`--uninstall`。在 macOS 先用 `--detect-clash-port` 核对本机端口；直接运行 helper 可避免安装入口的交互提示。构建或正式发布不等于已安装或长期稳定，运行中的旧服务不得为升级而强杀。下文仅针对 Windows。
 
 当前版本 2.2.1。升级保留端口、启动选项和专用出口配置，不要自行覆盖成本机开发者的端口或节点。
 

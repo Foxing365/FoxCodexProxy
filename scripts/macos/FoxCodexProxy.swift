@@ -5,13 +5,19 @@ import Darwin
 @_silgen_name("launch_activate_socket")
 func launchSocket(_ name: UnsafePointer<CChar>, _ fds: UnsafeMutablePointer<UnsafeMutablePointer<Int32>?>, _ count: UnsafeMutablePointer<Int>) -> Int32
 struct Failure: Error, CustomStringConvertible { let description: String }
-let home = FileManager.default.homeDirectoryForCurrentUser
+let args = Array(CommandLine.arguments.dropFirst())
+let sandboxIndex = args.firstIndex(of: "--test-home")
+let sandboxHome: URL? = sandboxIndex.flatMap { $0+1<args.count ? URL(fileURLWithPath:args[$0+1]).standardizedFileURL.resolvingSymlinksInPath() : nil }
+if let sandbox=sandboxHome {
+    let base=FileManager.default.temporaryDirectory.resolvingSymlinksInPath().path
+    guard sandbox.path.hasPrefix(base+"/FoxCodexProxy-install-") else {fputs("Invalid test sandbox\n",stderr);exit(1)}
+}
+let home = sandboxHome ?? FileManager.default.homeDirectoryForCurrentUser
 let support = home.appendingPathComponent("Library/Application Support/FoxCodexProxy")
-let label = "com.openai.codex-auto-proxy"
+let label = sandboxHome.map {"org.foxcodexproxy.test."+$0.lastPathComponent} ?? "com.openai.codex-auto-proxy"
 let markerStart = "# BEGIN fox-codex-proxy-macos"
 let markerEnd = "# END fox-codex-proxy-macos"
 let proxyKeys: Set<String> = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "WS_PROXY", "WSS_PROXY", "http_proxy", "https_proxy", "all_proxy", "ws_proxy", "wss_proxy", "NO_PROXY", "no_proxy"]
-let args = Array(CommandLine.arguments.dropFirst())
 func option(_ name: String, _ fallback: String) -> String { if let i = args.firstIndex(of: name), i+1 < args.count { return args[i+1] }; return fallback }
 func number(_ name: String, _ fallback: Int, range: ClosedRange<Int>) throws -> Int {
     guard let n = Int(option(name, String(fallback))), range.contains(n) else { throw Failure(description: "Invalid \(name)") }; return n
@@ -99,23 +105,24 @@ func fakeDNS(_ host: String) -> Bool {
     }
     return false
 }
-func tunEnabled() -> Bool {
+func clashConfig() -> [String:Any]? {
     let path = "/var/run/clash-verge-service/users/\(getuid())/verge-mihomo.sock"
-    let fd = socket(AF_UNIX, SOCK_STREAM, 0); guard fd >= 0 else { return false }; defer { close(fd) }; timeout(fd, seconds: 1)
+    let fd = socket(AF_UNIX, SOCK_STREAM, 0); guard fd >= 0 else { return nil }; defer { close(fd) }; timeout(fd, seconds: 1)
     var addr = sockaddr_un(); addr.sun_family = sa_family_t(AF_UNIX); addr.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
-    guard path.utf8.count < MemoryLayout.size(ofValue: addr.sun_path) else { return false }
+    guard path.utf8.count < MemoryLayout.size(ofValue: addr.sun_path) else { return nil }
     withUnsafeMutableBytes(of: &addr.sun_path) { raw in path.withCString { source in _ = memcpy(raw.baseAddress!, source, path.utf8.count+1) } }
     let rc = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
-    guard rc == 0 else { return false }
+    guard rc == 0 else { return nil }
     do {
         try sendAll(fd, Data("GET /configs HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n".utf8))
-        let h = try header(fd); guard String(decoding:h,as:UTF8.self).components(separatedBy:" ").dropFirst().first == "200" else { return false }
+        let h = try header(fd); guard String(decoding:h,as:UTF8.self).components(separatedBy:" ").dropFirst().first == "200" else { return nil }
         var body = Data(); var buffer = [UInt8](repeating:0,count:4096)
         while body.count < 262144 { let n = recv(fd,&buffer,buffer.count,0); if n <= 0 { break }; body.append(contentsOf:buffer.prefix(n)) }
         let json = try JSONSerialization.jsonObject(with:body) as? [String:Any]
-        return (json?["tun"] as? [String:Any])?["enable"] as? Bool ?? false
-    } catch { return false }
+        return json
+    } catch { return nil }
 }
+func tunEnabled() -> Bool { (clashConfig()?["tun"] as? [String:Any])?["enable"] as? Bool ?? false }
 final class Routes {
     let lock = NSLock(); let mode: String; let status: URL
     var cached: (String,String)?; var checked = Date.distantPast
@@ -334,7 +341,8 @@ func install(_ port:Int,_ upstream:Int,_ mode:String)throws {
     let logs=home.appendingPathComponent("Library/Logs");try fm.createDirectory(at:logs,withIntermediateDirectories:true)
     let original=URL(fileURLWithPath:CommandLine.arguments[0]).standardizedFileURL.resolvingSymlinksInPath()
     let newBin=try Data(contentsOf:original)
-    let job:[String:Any]=["Label":label,"ProgramArguments":[bin.path,"--serve","--launchd-socket","Listener","--port",String(port),"--clash-port",String(upstream),"--mode",mode,"--idle-timeout","30"],"Sockets":["Listener":["SockNodeName":"127.0.0.1","SockServiceName":String(port),"SockType":"stream"]],"ThrottleInterval":2,"ProcessType":"Background","StandardOutPath":logs.appendingPathComponent("FoxCodexProxy.log").path,"StandardErrorPath":logs.appendingPathComponent("FoxCodexProxy.error.log").path]
+    let jobArguments=[bin.path,"--serve","--launchd-socket","Listener","--port",String(port),"--clash-port",String(upstream),"--mode",mode,"--idle-timeout","30"] + (sandboxHome.map {["--test-home",$0.path]} ?? [])
+    let job:[String:Any]=["Label":label,"ProgramArguments":jobArguments,"Sockets":["Listener":["SockNodeName":"127.0.0.1","SockServiceName":String(port),"SockType":"stream"]],"ThrottleInterval":2,"ProcessType":"Background","StandardOutPath":logs.appendingPathComponent("FoxCodexProxy.log").path,"StandardErrorPath":logs.appendingPathComponent("FoxCodexProxy.error.log").path]
     let jobData=try PropertyListSerialization.data(fromPropertyList:job,format:.xml,options:0)
     if let oldEnv=oldEnv,!fm.fileExists(atPath:support.appendingPathComponent("env-before-install.txt").path){try restoreFile(support.appendingPathComponent("env-before-install.txt"),oldEnv,0o600)}
     if let oldJob=oldJob,!fm.fileExists(atPath:support.appendingPathComponent("previous-agent.plist").path){try restoreFile(support.appendingPathComponent("previous-agent.plist"),oldJob,0o600)}
@@ -398,18 +406,19 @@ signal(SIGPIPE,SIG_IGN)
 do {
     let saved=(try? Data(contentsOf:support.appendingPathComponent("env-state.json"))).flatMap{try? JSONSerialization.jsonObject(with:$0) as? [String:Any]}
     let port=try number("--port",args.contains("--install") ? saved?["port"] as? Int ?? 7898 : 7898,range:1...65535)
-    let upstream=try number("--clash-port",args.contains("--install") ? saved?["clash_port"] as? Int ?? 7897 : 7897,range:1...65535)
+    let upstream=try number("--clash-port",args.contains("--install") ? saved?["clash_port"] as? Int ?? clashConfig()?["mixed-port"] as? Int ?? 7897 : 7897,range:1...65535)
     let idle=try number("--idle-timeout",30,range:0...3600)
     let mode=option("--mode",args.contains("--install") ? saved?["mode"] as? String ?? "auto" : "auto");guard ["auto","direct","clash"].contains(mode) else {throw Failure(description:"Mode must be auto, direct or clash")}
     let status=URL(fileURLWithPath:option("--status-file",support.appendingPathComponent("status.json").path))
     if args.contains("--serve"){try serve(port,upstream,idle,mode,status)}
     else if args.contains("--install"){try install(port,upstream,mode)}
     else if args.contains("--uninstall"){try uninstall()}
+    else if args.contains("--detect-clash-port"){print(saved?["clash_port"] as? Int ?? clashConfig()?["mixed-port"] as? Int ?? 7897)}
     else if args.contains("--check"){print(Routes(mode,status).select(fresh:true))}
     else if args.contains("--status") {
         let result=run("/bin/launchctl",["print","gui/\(getuid())/\(label)"])
         print("Registered: \(result.0==0); helper running: \(registeredProcess())")
         if let data=try? Data(contentsOf:status){print("Cached status (see checked_at):\n"+String(decoding:data,as:UTF8.self))}
         else{print("No native route status yet")}
-    } else {print("FoxCodexProxy macOS 2.2.1 preview\n--install [--clash-port 7897 --port 7898 --mode auto]\n--status | --check | --uninstall\n--serve [--port 7898 --clash-port 7897 --mode auto --idle-timeout 30]\nThe service starts only on connections and exits when no connections remain. No tray or system proxy changes.")}
+    } else {print("FoxCodexProxy macOS 2.3.0\n--install [--clash-port 7897 --port 7898 --mode auto]\n--status | --check | --uninstall\n--serve [--port 7898 --clash-port 7897 --mode auto --idle-timeout 30]\nThe service starts only on connections and exits when no connections remain. No tray or system proxy changes.")}
 } catch {fputs("FoxCodexProxy: \(error)\n",stderr);exit(1)}

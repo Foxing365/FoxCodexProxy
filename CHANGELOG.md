@@ -1,3 +1,11 @@
+# v2.3.0 — cross-platform release
+
+- 发布 macOS 原生 Universal 安装包和统一 agent skill 包；Windows EXE/ZIP 沿用 v2.2.1 已构建产物。
+- macOS 双击安装入口自动检测 Clash 端口，附状态/卸载入口，日常无托盘、保留原图标。
+- 支持 agent 非交互安装，新增隔离环境真实安装/升级/卸载及重新安装测试。
+- 保留已安装端口、用户编辑及原有配置；活跃服务升级会安全拒绝。
+- 正式发布不代表所有网络重试已经解决，仍明确跨设备及长期稳定性边界。
+
 # v2.2.1 — macOS native preview
 
 - 新增 macOS 13+ arm64/x86_64 Universal helper，不依赖 Python。
