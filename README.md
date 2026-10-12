@@ -1,12 +1,25 @@
 # FoxCodexProxy
 
-给 Windows 上的 Codex 桌面应用使用的本地代理桥接和托盘启动器。当前版本：**v2.2.1 预览版（仅 Windows）**。macOS 版暂不发布。
+给 Codex 桌面应用使用的本地代理工具。Windows 为 **v2.2.1 预览版托盘启动器**；macOS 新增 **v2.2.1 原生按需构建**，无托盘、保留原图标。macOS 安装包当前由本地构建生成，尚未上传 GitHub Release。
 
 软件回归测试已通过，但持续端到端稳定性尚未验证：后续测试中，曾短期连续通过的节点也出现 TCP 超时。请勿把本版理解为已消除重连；专用节点仅在你自己的重复真实请求验证通过后启用。
 
 这是第三方辅助工具，不是 OpenAI 官方产品。不需要管理员权限，不安装证书，不修改 Windows 全局代理，也不设置用户级代理环境变量。
 
-## 下载安装
+## macOS 构建与使用
+
+macOS 13+，支持 Apple Silicon / Intel。系统 launchd 仅保留回环 socket；Codex 连接时启动 helper，所有连接结束 30 秒后退出，不添加登录常驻程序。保留原图标和 WSS，不需要 Python。
+
+```sh
+./scripts/macos/build.sh
+./packaging/build-macos-release.sh
+# 在安装包完整解压后，核对 Clash 端口再安装
+./bin/macos/fox-codex-proxy --install --clash-port 7897 --port 7898
+```
+
+安装到本地 Application Support，不从 OneDrive 长期运行。安装/卸载的配置保护、未签名公证限制和验证边界见 [macOS 使用说明](references/macos.md)。实际方案与 GitHub 项目的比较见 [研究记录](references/macos-comparison.md)：使用体验更符合我们的需求，尚无证据证明稳定性更优。构建不会自动替换本机正在运行的旧 Python 服务。
+
+## Windows 下载安装
 
 打开 [Releases](https://github.com/Foxing365/FoxCodexProxy/releases/tag/v2.2.1)，选择一种方式：
 

@@ -1,13 +1,15 @@
 ---
 name: fox-codex-proxy
-description: Install, inspect, repair, configure, or remove FoxCodexProxy for Codex Desktop on Windows, with a process-scoped direct-or-Clash bridge and tray launcher. macOS is not released in this version.
+description: Install, inspect, repair, configure, or remove FoxCodexProxy for Codex Desktop on Windows or macOS. Windows uses a tray launcher; macOS uses an on-demand native launchd bridge with the original app icon.
 ---
 
-# FoxCodexProxy for Windows
+# FoxCodexProxy
 
-Version: 2.2.1. Windows-only; macOS remains pending.
+Version: 2.2.1. Windows release and native macOS preview.
 
-Read [references/windows.md](references/windows.md) before installing or changing the proxy. This release supports native Windows only; do not run these installers on macOS, Linux, or WSL. macOS release is pending.
+Choose the host platform. On macOS read [references/macos.md](references/macos.md), use the bundled universal `bin/macos/fox-codex-proxy`, and install only when requested with `--install`. Preserve original-icon launches, WSS, and on-demand launchd activation; do not add a tray, login watcher, KeepAlive, RunAtLoad, global proxy, or new model provider. Run `--status` and a fresh `--check`, then verify a real Codex response separately. Active-service upgrades stop safely; do not kill running tasks to continue. Source build: `scripts/macos/build.sh`. See [macOS comparisons](references/macos-comparison.md) for evidence and limitations.
+
+The instructions below are Windows-specific. Read [references/windows.md](references/windows.md) before Windows operations. Do not run Windows installers on macOS, Linux or WSL.
 
 Installation of this agent skill only makes the instructions available; it does not install the tray application or enable startup. When the user asks to install the proxy, run the application installer too.
 

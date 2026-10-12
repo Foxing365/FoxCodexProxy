@@ -1,3 +1,12 @@
+# v2.2.1 — macOS native preview
+
+- 新增 macOS 13+ arm64/x86_64 Universal helper，不依赖 Python。
+- 保留原图标、WSS、launchd socket activation；无托盘、无登录常驻。
+- Dispatch 持有连接任务；poll 双向有界转发、半关闭、CONNECT 后禁止换线重放。
+- 增加 Auto/Direct/Clash、TUN/fake-IP 检查、带时间戳的限流诊断。
+- 增加配置所有权、事务回退、活跃连接升级保护及安装/卸载命令。
+- 仍为预览构建，跨设备安装和长期端到端稳定性待验证，不承诺消灭重试。
+
 # v2.2.1 — Windows
 
 - Auto 改用 Codex 实际响应接口 HEAD 探测，直连连续三次成功才启用；早期空隧道关闭触发 120 秒冷却。
